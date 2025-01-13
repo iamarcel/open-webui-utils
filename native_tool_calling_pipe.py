@@ -181,9 +181,10 @@ class ToolCallingModel(ABC):
 
 
 class OpenAIToolCallingModel(ToolCallingModel):
-    def __init__(self, client: OpenAI, model_id: str):
+    def __init__(self, client: OpenAI, model_id: str, use_prompt_caching: bool):
         self.client = client
         self.model_id = model_id
+        self.use_prompt_caching = use_prompt_caching
 
     async def stream(
         self,
@@ -195,6 +196,20 @@ class OpenAIToolCallingModel(ToolCallingModel):
 
         tool_calls_map: dict[str, ToolCall] = {}
         last_tool_call_id: Optional[str] = None
+
+        if self.use_prompt_caching:
+            # Find last user message
+            last_user_message: Optional[ChatCompletionMessageParam] = None
+            for message in messages:
+                if 'role' in message and message["role"] == "user":
+                    last_user_message = message
+                    break
+
+            # Set caching property
+            if last_user_message and 'content' in last_user_message:
+                contents = last_user_message["content"]
+                if isinstance(contents, list):
+                    contents[-1]["cache_control"] = { "type": "ephemeral" } # type: ignore
 
         for chunk in self.client.chat.completions.create(
             model=self.model_id,
@@ -313,6 +328,9 @@ class Pipe:
             default=["gpt-4o-mini"],
             description="List of model IDs to enable (comma-separated)",
         )
+        ENABLE_PROMPT_CACHING: bool = Field(
+            default=True, description="Enable prompt caching (only affects Anthropic models)"
+        )
 
     def __init__(self):
         self.valves = self.Valves()
@@ -376,7 +394,7 @@ class Pipe:
         model_id = body["model"] or ""
         model_id = model_id[model_id.find(".") + 1 :]
 
-        model = OpenAIToolCallingModel(client, model_id)
+        model = OpenAIToolCallingModel(client, model_id, self.valves.ENABLE_PROMPT_CACHING)
         ev = EventEmitter(__event_emitter__)
 
         while True:
