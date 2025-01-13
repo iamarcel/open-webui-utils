@@ -5,7 +5,7 @@ author_url: https://samyn.co
 git_url: https://github.com/iamarcel/open-webui-utils.git
 description: Seamless OpenAI API-native tool calling with streaming and multi-call support
 required_open_webui_version: 0.5.0
-version: 0.1.0
+version: 0.2.0
 license: MIT
 """
 
@@ -242,20 +242,32 @@ class OpenAIToolCallingModel(ToolCallingModel):
 
     def append_tool_calls(self, body: dict, tool_calls: Iterable[ToolCall]):
         if "messages" in body:
+            tool_call_message = {
+                "role": "assistant",
+                "tool_calls": [
+                    {
+                        "id": tool_call.id,
+                        "type": "function",
+                        "function": {
+                            "name": tool_call.name,
+                            "arguments": tool_call.arguments,
+                        },
+                    }
+                    for tool_call in tool_calls
+                ],
+            }
+
+            if body["messages"][-1]["role"] == "assistant":
+                body["messages"][-1]["tool_calls"] = tool_call_message["tool_calls"]
+            else:
+                body["messages"].append(tool_call_message)
+
+    def append_assistant_message(self, body: dict, message: str) -> None:
+        if "messages" in body:
             body["messages"].append(
                 {
                     "role": "assistant",
-                    "tool_calls": [
-                        {
-                            "id": tool_call.id,
-                            "type": "function",
-                            "function": {
-                                "name": tool_call.name,
-                                "arguments": tool_call.arguments,
-                            },
-                        }
-                        for tool_call in tool_calls
-                    ],
+                    "content": message,
                 }
             )
 
@@ -372,11 +384,15 @@ class Pipe:
             tool_calls: list[ToolCall] = []
 
             # Stream model response: pass text content through and collect tool calls
+            message = ""
             async for chunk in model.stream(body, __tools__):
                 tool_calls = list(chunk.tool_calls) if chunk.tool_calls else tool_calls
 
                 if chunk.message:
+                    message += chunk.message
                     yield chunk.message
+
+            model.append_assistant_message(body, message)
 
             if not tool_calls:
                 # No tools to execute, stop the loop
