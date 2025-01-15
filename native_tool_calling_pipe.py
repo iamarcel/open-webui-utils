@@ -5,7 +5,7 @@ author_url: https://samyn.co
 git_url: https://github.com/iamarcel/open-webui-utils.git
 description: Seamless OpenAI API-native tool calling with streaming and multi-call support
 required_open_webui_version: 0.5.0
-version: 0.2.0
+version: 0.2.1
 license: MIT
 """
 
@@ -138,7 +138,9 @@ class ToolCallResult(BaseModel):
     def to_display(self) -> str:
         if self.error:
             return f"\n\n<details>\n<summary>Error executing {self.tool_call.name}</summary>\n{self.error}\n</details>\n\n"
-        return f"\n\n<details>\n<summary>{self.tool_call.name} {self.tool_call.arguments}</summary>\n{json.loads(self.result) if self.result else ''}\n</details>\n\n"
+        return f"\n\n<details>\n<summary>Executed {self.tool_call.name}</summary>\n" \
+            f"Tool ran with arguments: {self.tool_call.arguments}\n\n" \
+            f"Result:\n{json.loads(self.result) if self.result else 'None'}\n</details>\n\n"
 
 
 class ToolCallingChunk(BaseModel):
@@ -210,6 +212,10 @@ class OpenAIToolCallingModel(ToolCallingModel):
                 contents = last_user_message["content"]
                 if isinstance(contents, list):
                     contents[-1]["cache_control"] = { "type": "ephemeral" } # type: ignore
+                elif isinstance(contents, str):
+                    last_user_message["content"] = [ # type: ignore
+                        { "type": "text", "text": contents, "cache_control": { "type": "ephemeral" } },
+                    ]
 
         for chunk in self.client.chat.completions.create(
             model=self.model_id,
