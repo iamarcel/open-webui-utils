@@ -5,7 +5,7 @@ author_url: https://samyn.co
 git_url: https://github.com/iamarcel/open-webui-utils.git
 description: Seamless OpenAI API-native tool calling with streaming and multi-call support
 required_open_webui_version: 0.5.0
-version: 0.2.1
+version: 0.2.2
 license: MIT
 """
 
@@ -27,6 +27,7 @@ from typing import (
     Union,
 )
 import asyncio
+import httpx
 from pydantic import BaseModel, Field
 from openai import NotGiven, OpenAI
 from openai.types.chat import (
@@ -34,6 +35,14 @@ from openai.types.chat import (
     ChatCompletionToolParam,
 )
 from openai.types.shared_params.function_definition import FunctionDefinition
+
+
+# Patched HTTPClient because the OpenAI API passes "proxies" which doesn't exist in
+# httpx >= 0.28
+class CustomHTTPClient(httpx.Client):
+    def __init__(self, *args, **kwargs):
+        kwargs.pop("proxies", None)  # Remove the 'proxies' argument if present
+        super().__init__(*args, **kwargs)
 
 
 class ToolSpecParametersProperty(TypedDict):
@@ -138,9 +147,11 @@ class ToolCallResult(BaseModel):
     def to_display(self) -> str:
         if self.error:
             return f"\n\n<details>\n<summary>Error executing {self.tool_call.name}</summary>\n{self.error}\n</details>\n\n"
-        return f"\n\n<details>\n<summary>Executed {self.tool_call.name}</summary>\n" \
-            f"Tool ran with arguments: {self.tool_call.arguments}\n\n" \
+        return (
+            f"\n\n<details>\n<summary>Executed {self.tool_call.name}</summary>\n"
+            f"Tool ran with arguments: {self.tool_call.arguments}\n\n"
             f"Result:\n{json.loads(self.result) if self.result else 'None'}\n</details>\n\n"
+        )
 
 
 class ToolCallingChunk(BaseModel):
@@ -203,18 +214,22 @@ class OpenAIToolCallingModel(ToolCallingModel):
             # Find last user message
             last_user_message: Optional[ChatCompletionMessageParam] = None
             for message in messages:
-                if 'role' in message and message["role"] == "user":
+                if "role" in message and message["role"] == "user":
                     last_user_message = message
                     break
 
             # Set caching property
-            if last_user_message and 'content' in last_user_message:
+            if last_user_message and "content" in last_user_message:
                 contents = last_user_message["content"]
                 if isinstance(contents, list):
-                    contents[-1]["cache_control"] = { "type": "ephemeral" } # type: ignore
+                    contents[-1]["cache_control"] = {"type": "ephemeral"}  # type: ignore
                 elif isinstance(contents, str):
-                    last_user_message["content"] = [ # type: ignore
-                        { "type": "text", "text": contents, "cache_control": { "type": "ephemeral" } },
+                    last_user_message["content"] = [  # type: ignore
+                        {
+                            "type": "text",
+                            "text": contents,
+                            "cache_control": {"type": "ephemeral"},
+                        },
                     ]
 
         for chunk in self.client.chat.completions.create(
@@ -335,7 +350,8 @@ class Pipe:
             description="List of model IDs to enable (comma-separated)",
         )
         ENABLE_PROMPT_CACHING: bool = Field(
-            default=True, description="Enable prompt caching (only affects Anthropic models)"
+            default=True,
+            description="Enable prompt caching (only affects Anthropic models)",
         )
 
     def __init__(self):
@@ -394,13 +410,17 @@ class Pipe:
             return
 
         client = OpenAI(
-            api_key=self.valves.OPENAI_API_KEY, base_url=self.valves.OPENAI_BASE_URL
+            api_key=self.valves.OPENAI_API_KEY,
+            base_url=self.valves.OPENAI_BASE_URL,
+            http_client=CustomHTTPClient(),
         )
 
         model_id = body["model"] or ""
         model_id = model_id[model_id.find(".") + 1 :]
 
-        model = OpenAIToolCallingModel(client, model_id, self.valves.ENABLE_PROMPT_CACHING)
+        model = OpenAIToolCallingModel(
+            client, model_id, self.valves.ENABLE_PROMPT_CACHING
+        )
         ev = EventEmitter(__event_emitter__)
 
         while True:
