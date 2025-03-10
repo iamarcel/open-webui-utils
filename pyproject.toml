@@ -3,9 +3,10 @@ name = "open-webui-utils"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
-requires-python = ">=3.13"
+requires-python = ">=3.11"
 dependencies = [
+    "open-webui==0.5.14",
     "openai>=1.59.6",
-    "pydantic>=2.10.5",
+    "pydantic==2.9.2",
     "requests>=2.32.3",
 ]

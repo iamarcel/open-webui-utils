@@ -26,8 +26,11 @@ from typing import (
     TypedDict,
     Union,
 )
+import html
 import asyncio
+import uuid
 import httpx
+from openai.resources.chat import Chat
 from pydantic import BaseModel, Field
 from openai import NotGiven, OpenAI
 from openai.types.chat import (
@@ -35,6 +38,7 @@ from openai.types.chat import (
     ChatCompletionToolParam,
 )
 from openai.types.shared_params.function_definition import FunctionDefinition
+from open_webui.models.chats import ChatForm, Chats
 
 
 # Patched HTTPClient because the OpenAI API passes "proxies" which doesn't exist in
@@ -103,6 +107,12 @@ class EventEmitterMessage(TypedDict):
     data: EventEmitterMessageData
 
 
+class Metadata(TypedDict):
+    chat_id: str
+    user_id: str
+    message_id: str
+
+
 class EventEmitter:
     def __init__(
         self,
@@ -133,7 +143,7 @@ class EventEmitter:
             EventEmitterMessage(
                 type="message",
                 data=EventEmitterMessageData(
-                    content=f"\n<details>\n<summary>{summary}</summary>\n{content}\n</details>",
+                    content=f'\n<details type="tool_calls" done="true" results="{html.escape(content)}">\n<summary>{summary}</summary>\n{content}\n</details>',
                 ),
             )
         )
@@ -146,11 +156,12 @@ class ToolCallResult(BaseModel):
 
     def to_display(self) -> str:
         if self.error:
-            return f"\n\n<details>\n<summary>Error executing {self.tool_call.name}</summary>\n{self.error}\n</details>\n\n"
+            return f'\n\n<details type="tool_calls" done="true">\n<summary>Error executing {self.tool_call.name}</summary>\n{self.error}\n</details>\n\n'
         return (
-            f"\n\n<details>\n<summary>Executed {self.tool_call.name}</summary>\n"
+            f'\n\n<details type="tool_calls" done="true" results="{html.escape(self.result) if self.result else ""}">'
+            f"\n<summary>Executed {self.tool_call.name}</summary>\n"
             f"Tool ran with arguments: {self.tool_call.arguments}\n\n"
-            f"Result:\n{json.loads(self.result) if self.result else 'None'}\n</details>\n\n"
+            f'Result:\n{json.loads(self.result) if self.result else "None"}\n</details>\n\n'
         )
 
 
@@ -400,6 +411,7 @@ class Pipe:
     async def pipe(
         self,
         body: dict,
+        __metadata__: Metadata,
         __user__: dict | None = None,
         __task__: str | None = None,
         __tools__: dict[str, ToolCallable] | None = None,
