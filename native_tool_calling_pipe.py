@@ -5,7 +5,7 @@ author_url: https://samyn.co
 git_url: https://github.com/iamarcel/open-webui-utils.git
 description: Seamless OpenAI API-native tool calling with streaming and multi-call support
 required_open_webui_version: 0.5.0
-version: 0.2.2
+version: 0.2.3
 license: MIT
 """
 
@@ -386,10 +386,13 @@ class Pipe:
             if not tool:
                 raise ValueError(f"Tool '{tool_call.name}' not found")
 
-            parsed_args = json.loads(tool_call.arguments)
-            await ev.status(
-                f"Executing tool '{tool_call.name}' with arguments: {parsed_args}"
-            )
+            if tool_call.arguments:
+                parsed_args = json.loads(tool_call.arguments)
+                await ev.status(
+                    f"Executing tool '{tool_call.name}' with arguments: {parsed_args}"
+                )
+            else:
+                parsed_args = {}
 
             result = await tool["callable"](**parsed_args)
 
